@@ -1,51 +1,31 @@
-FROM python:3.9-slim
+FROM python:3.10-slim
 
-# Locale ve timezone için gerekli paketler
-RUN apt-get update && apt-get install -y \
+WORKDIR /app
+
+# Gerekli sistem paketlerini yükle
+# locale-gen ve curl gerekebilir
+RUN apt-get update && apt-get install -y --no-install-recommends \
     locales \
-    tzdata \
-    wget \
-    gnupg \
-    unzip \
-    curl \
-    fonts-liberation \
-    libatk-bridge2.0-0 \
-    libgtk-3-0 \
-    libx11-xcb1 \
-    libnss3 \
-    libxcomposite1 \
-    libxcursor1 \
-    libxdamage1 \
-    libxrandr2 \
-    xdg-utils \
-    libgbm1 \
-    libasound2 \
-    libxshmfence1 \
-    libxss1 \
-    apt-transport-https \
-    ca-certificates \
-    libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Timezone: Europe/Istanbul
-ENV TZ=Europe/Istanbul
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+# Türkçe locale ayarla
+RUN sed -i '/tr_TR.UTF-8/s/^# //g' /etc/locale.gen && \
+    locale-gen
+ENV LANG tr_TR.UTF-8
+ENV LANGUAGE tr_TR:tr
+ENV LC_ALL tr_TR.UTF-8
 
-# Locale: Turkish (UTF-8)
-RUN sed -i 's/# tr_TR.UTF-8 UTF-8/tr_TR.UTF-8 UTF-8/' /etc/locale.gen \
-    && locale-gen
-
-# Locale environment değişkenleri
-ENV LANG=tr_TR.UTF-8 \
-    LANGUAGE=tr_TR:tr \
-    LC_ALL=tr_TR.UTF-8
-
-# Python bağımlılıklarını yükle
+# Kopyala ve yükle
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Kodları kopyala
-COPY . .
+# Kaynak kodları kopyala
+COPY src/ /app/src/
+COPY .env.example /app/.env.example
 
-# Uygulamayı başlat
-CMD ["python3", "e_bilet.py"]
+# Environment variable (Docker içinde çalışırken)
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
+# Başlat
+CMD ["python", "src/main.py"]
