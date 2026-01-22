@@ -1062,14 +1062,6 @@ async def button_callback(update: Update, context: CallbackContext):
             cleanup_ids.append(query.message.message_id)
             await delete_messages(context, chat_id, cleanup_ids)
             
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"✅ *İzleme ayarları tamamlandı!*\n\n"
-                     f"🚆 *{from_station['name']}* ➡ *{to_station['name']}*\n🗓 *{date_tr_str}*\n\n"
-                     f"İzleme başlatılıyor...",
-                parse_mode='Markdown'
-            )
-            
             # Monitor thread'i başlat
             check_interval = 60
             stop_event = threading.Event()
