@@ -412,6 +412,21 @@ def create_passenger_count_keyboard(callback_prefix: str) -> InlineKeyboardMarku
     ]
     return InlineKeyboardMarkup(keyboard)
 
+def create_interval_selection_keyboard(callback_prefix: str) -> InlineKeyboardMarkup:
+    """İzleme aralığı seçim klavyesi"""
+    keyboard = [
+        [
+            InlineKeyboardButton("1 dk", callback_data=f"{callback_prefix}_60"),
+            InlineKeyboardButton("2 dk", callback_data=f"{callback_prefix}_120"),
+        ],
+        [
+            InlineKeyboardButton("5 dk", callback_data=f"{callback_prefix}_300"),
+            InlineKeyboardButton("10 dk", callback_data=f"{callback_prefix}_600"),
+        ],
+        [InlineKeyboardButton("❌ İptal", callback_data="cancel_search")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 def check_api_and_parse(from_id: int, to_id: int, target_date: datetime, 
                          selected_times: list = None, include_business: bool = True, min_seats: int = 1):
     """
@@ -1051,6 +1066,33 @@ async def button_callback(update: Update, context: CallbackContext):
             min_seats = int(parts[1])
             state["min_seats"] = min_seats
             
+            # İzleme sıklığı seçimine geç
+            state["state"] = "selecting_interval"
+            keyboard = create_interval_selection_keyboard("minterval")
+            
+            from_station = get_station_by_id(state["from_station_id"])
+            to_station = get_station_by_id(state["to_station_id"])
+            date_tr_str = state["target_date"].strftime("%d %B %Y")
+            times_str = ", ".join(sorted(state["selected_times"]))
+            biz_str = "Dahil" if state["include_business"] else "Hariç"
+            
+            await query.edit_message_text(
+                text=f"🚆 *{from_station['name']}* ➡ *{to_station['name']}*\n🗓 *{date_tr_str}*\n"
+                     f"⏰ Saatler: {times_str}\n💼 Business: {biz_str}\n👥 Min. Yer: {min_seats}\n\n"
+                     f"🔄 *Hangi sıklıkla kontrol edilsin?*",
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+
+        # İzleme sıklığı seçimi callback'leri
+        elif prefix == 'minterval':
+            if chat_id not in user_states or user_states[chat_id].get("state") != "selecting_interval":
+                await query.edit_message_text("❌ Oturum süresi doldu. Lütfen /monitor ile tekrar başlayın.")
+                return
+            
+            state = user_states[chat_id]
+            check_interval = int(parts[1])
+            
             # İzlemeyi başlat
             from_station = get_station_by_id(state["from_station_id"])
             to_station = get_station_by_id(state["to_station_id"])
@@ -1062,8 +1104,16 @@ async def button_callback(update: Update, context: CallbackContext):
             cleanup_ids.append(query.message.message_id)
             await delete_messages(context, chat_id, cleanup_ids)
             
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"✅ *İzleme ayarları tamamlandı!*\n\n"
+                     f"🚆 *{from_station['name']}* ➡ *{to_station['name']}*\n🗓 *{date_tr_str}*\n\n"
+                     f"🔄 {check_interval // 60} dakikada bir kontrol edilecek.\n"
+                     f"İzleme başlatılıyor...",
+                parse_mode='Markdown'
+            )
+            
             # Monitor thread'i başlat
-            check_interval = 60
             stop_event = threading.Event()
             monitor_thread = threading.Thread(
                 target=monitoring_loop,
@@ -1175,7 +1225,7 @@ def main():
     app.add_handler(CommandHandler("stop", stop_command))
     
     # Callback handler - tüm button pattern'leri
-    app.add_handler(CallbackQueryHandler(button_callback, pattern='^(from_|to_|date_|mtime_|mbiz_|mcount_|cancel_search)'))
+    app.add_handler(CallbackQueryHandler(button_callback, pattern='^(from_|to_|date_|mtime_|mbiz_|mcount_|minterval_|cancel_search)'))
     
     # Metin mesajları için handler (komut olmayan mesajlar)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_handler))
