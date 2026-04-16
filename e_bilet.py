@@ -22,7 +22,8 @@ load_dotenv()
 
 TELEGRAM_API_TOKEN = os.getenv("TELEGRAM_API_TOKEN")
 
-monitor_jobs = {}
+monitor_jobs = {}  # {chat_id: {job_id: {"thread": thread, "stop_event": event, "info": {...}}}}
+job_id_counter = 0
 user_states = {}
 STATIONS_DATA = []
 STATIONS_BY_ID = {}
@@ -201,9 +202,10 @@ def normalize_turkish(text: str) -> str:
 def get_train_type_display(raw_type: str) -> str:
     """
     API'den gelen tren tipi kodunu kullanıcı dostu isme çevirir.
-    Örn: 'YHT' -> 'YHT', 'AHT' -> 'Kara Tren'
+    Örn: 'YHT' -> 'YHT', 'AH' -> 'Kara Tren'
     """
     type_map = {
+        'AH': 'Kara Tren',
         'AHT': 'Kara Tren',
     }
     return type_map.get(raw_type, raw_type)
@@ -578,13 +580,14 @@ def run_one_time_check(chat_id: str, from_id: int, to_id: int, target_date: date
     send_telegram_message(message, chat_id)
     print(f"Tek seferlik kontrol tamamlandı ({chat_id}).")
 
-def monitoring_loop(chat_id: str, stop_event: threading.Event, from_id: int, to_id: int, 
+def monitoring_loop(chat_id: str, job_id: int, stop_event: threading.Event, from_id: int, to_id: int, 
                      target_date: datetime, interval_seconds: int,
                      selected_times: list = None, include_business: bool = True, min_seats: int = 1):
     """
     Sürekli izleme döngüsü.
     
     Args:
+        job_id: Bu izleme işinin benzersiz ID'si
         selected_times: Sadece bu saatlerdeki trenleri izle (None = hepsi)
         include_business: Business sınıfını dahil et
         min_seats: Minimum koltuk sayısı filtresi
@@ -693,10 +696,12 @@ def monitoring_loop(chat_id: str, stop_event: threading.Event, from_id: int, to_
         if stop_event.wait(interval_seconds):
             break
             
-    print(f"API İzleme durdu ({chat_id}).")
-    if chat_id in monitor_jobs:
-        del monitor_jobs[chat_id]
-        print(f"İzleme işi listeden kaldırıldı ({chat_id}).")
+    print(f"API İzleme durdu ({chat_id}, Job #{job_id}).")
+    if chat_id in monitor_jobs and job_id in monitor_jobs[chat_id]:
+        del monitor_jobs[chat_id][job_id]
+        if not monitor_jobs[chat_id]:  # Kullanıcının başka izlemesi kalmadıysa
+            del monitor_jobs[chat_id]
+        print(f"İzleme işi listeden kaldırıldı ({chat_id}, Job #{job_id}).")
 
 def create_date_keyboard(action: str, from_station_id: int, to_station_id: int) -> InlineKeyboardMarkup:
     keyboard = []
@@ -734,8 +739,9 @@ async def start(update: Update, context: CallbackContext):
 
 *KOMUTLAR:*
 • `/check` - Tek seferlik bilet kontrolü
-• `/monitor` - Sürekli bilet takibi
-• `/stop` - Aktif izlemeyi durdurur
+• `/monitor` - Sürekli bilet takibi (birden fazla olabilir)
+• `/status` - Aktif izlemeleri görüntüle
+• `/stop` - Aktif izlemeleri durdur
 
 İstasyonlar TCDD'den dinamik olarak yüklenir.
     """
@@ -772,11 +778,6 @@ async def monitor_command(update: Update, context: CallbackContext):
     chat_id = str(update.message.chat_id)
     cleanup_ids = [update.message.message_id]
     
-    if chat_id in monitor_jobs:
-        await delete_messages(context, chat_id, cleanup_ids)
-        await update.message.reply_text("Zaten aktif bir izlemeniz var. Durdurmak için /stop yazın.")
-        return
-    
     if not STATIONS_DATA:
         loading_msg = await update.message.reply_text("⏳ İstasyonlar yükleniyor, lütfen bekleyin...")
         cleanup_ids.append(loading_msg.message_id)
@@ -803,13 +804,67 @@ async def monitor_command(update: Update, context: CallbackContext):
 async def stop_command(update: Update, context: CallbackContext):
     chat_id = str(update.message.chat_id)
     
-    if chat_id in monitor_jobs:
-        monitor_thread, stop_event = monitor_jobs.pop(chat_id)
-        print(f"Durdurma sinyali gönderiliyor: {chat_id}")
-        stop_event.set()
-        await update.message.reply_text("İzleme durduruluyor... 🛑")
-    else:
+    if chat_id not in monitor_jobs or not monitor_jobs[chat_id]:
         await update.message.reply_text("Aktif bir izlemeniz bulunmuyor.")
+        return
+    
+    user_jobs = monitor_jobs[chat_id]
+    
+    if len(user_jobs) == 1:
+        # Tek izleme varsa direkt durdur
+        job_id = list(user_jobs.keys())[0]
+        job = user_jobs[job_id]
+        job["stop_event"].set()
+        info = job["info"]
+        await update.message.reply_text(
+            f"🛑 İzleme durduruluyor...\n"
+            f"#{job_id} | {info['from']} ➡ {info['to']} | {info['date']}"
+        )
+        return
+    
+    # Birden fazla izleme varsa liste göster
+    keyboard = []
+    msg_text = "📝 *Aktif İzlemeleriniz:*\n\n"
+    
+    for job_id, job in user_jobs.items():
+        info = job["info"]
+        msg_text += f"🔵 *#{job_id}* | {info['from']} ➡ {info['to']}\n"
+        msg_text += f"   📅 {info['date']} | 🔄 {info['interval']}sn\n\n"
+        
+        keyboard.append([InlineKeyboardButton(
+            f"🛑 #{job_id} - {info['from']} ➡ {info['to']}", 
+            callback_data=f"stop_job_{job_id}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton("⛔ Tümünü Durdur", callback_data="stop_all")])
+    
+    await update.message.reply_text(
+        msg_text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+
+async def status_command(update: Update, context: CallbackContext):
+    chat_id = str(update.message.chat_id)
+    
+    if chat_id not in monitor_jobs or not monitor_jobs[chat_id]:
+        await update.message.reply_text("ℹ️ Aktif bir izlemeniz bulunmuyor.")
+        return
+    
+    user_jobs = monitor_jobs[chat_id]
+    msg_text = f"📝 *Aktif İzlemeleriniz ({len(user_jobs)} adet):*\n\n"
+    
+    for job_id, job in user_jobs.items():
+        info = job["info"]
+        times_str = ", ".join(info.get("times", [])) if info.get("times") else "Tümü"
+        msg_text += f"🔵 *#{job_id}* | {info['from']} ➡ {info['to']}\n"
+        msg_text += f"   📅 {info['date']}\n"
+        msg_text += f"   ⏰ Saatler: {times_str}\n"
+        msg_text += f"   🔄 Kontrol sıklığı: {info['interval']}sn\n\n"
+    
+    msg_text += "Durdurmak için /stop yazın."
+    
+    await update.message.reply_text(msg_text, parse_mode='Markdown')
 
 async def button_callback(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -826,6 +881,32 @@ async def button_callback(update: Update, context: CallbackContext):
                 del user_states[chat_id]
             else:
                 await query.edit_message_text("❌ İşlem iptal edildi.")
+            return
+        
+        # Stop job callbacks
+        if query.data == "stop_all":
+            if chat_id in monitor_jobs:
+                stopped_count = 0
+                for job_id, job in list(monitor_jobs[chat_id].items()):
+                    job["stop_event"].set()
+                    stopped_count += 1
+                await query.edit_message_text(f"⛔ Tüm izlemeler durduruluyor... ({stopped_count} adet) 🛑")
+            else:
+                await query.edit_message_text("Aktif bir izlemeniz bulunmuyor.")
+            return
+        
+        if query.data.startswith("stop_job_"):
+            job_id = int(query.data.split("_")[2])
+            if chat_id in monitor_jobs and job_id in monitor_jobs[chat_id]:
+                job = monitor_jobs[chat_id][job_id]
+                info = job["info"]
+                job["stop_event"].set()
+                await query.edit_message_text(
+                    f"🛑 İzleme durduruluyor...\n"
+                    f"#{job_id} | {info['from']} ➡ {info['to']} | {info['date']}"
+                )
+            else:
+                await query.edit_message_text("❌ Bu izleme zaten durdurulmuş.")
             return
         
         parts = query.data.split('_')
@@ -1101,15 +1182,33 @@ async def button_callback(update: Update, context: CallbackContext):
             await delete_messages(context, chat_id, cleanup_ids)
             
             # Monitor thread'i başlat
+            global job_id_counter
+            job_id_counter += 1
+            current_job_id = job_id_counter
+            
             stop_event = threading.Event()
             monitor_thread = threading.Thread(
                 target=monitoring_loop,
-                args=(chat_id, stop_event, state["from_station_id"], state["to_station_id"], 
+                args=(chat_id, current_job_id, stop_event, state["from_station_id"], state["to_station_id"], 
                       state["target_date"], check_interval, 
                       state["selected_times"], state["include_business"], state["min_seats"])
             )
             
-            monitor_jobs[chat_id] = (monitor_thread, stop_event)
+            if chat_id not in monitor_jobs:
+                monitor_jobs[chat_id] = {}
+            
+            monitor_jobs[chat_id][current_job_id] = {
+                "thread": monitor_thread,
+                "stop_event": stop_event,
+                "info": {
+                    "from": from_station['name'],
+                    "to": to_station['name'],
+                    "date": date_tr_str,
+                    "interval": check_interval,
+                    "times": state["selected_times"]
+                }
+            }
+            
             monitor_thread.start()
             
             # Kullanıcı durumunu temizle
@@ -1269,11 +1368,24 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("check", check_command))
     app.add_handler(CommandHandler("monitor", monitor_command))
+    app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("stop", stop_command))
     
-    app.add_handler(CallbackQueryHandler(button_callback, pattern='^(from_|to_|date_|mtime_|mbiz_|mcount_|minterval_|cancel_search)'))
+    app.add_handler(CallbackQueryHandler(button_callback, pattern='^(from_|to_|date_|mtime_|mbiz_|mcount_|minterval_|cancel_search|stop_)'))
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_handler))
+
+    # Telegram komut menüsünü ayarla
+    async def post_init(application):
+        await application.bot.set_my_commands([
+            ("start", "Botu başlat ve yardım göster"),
+            ("check", "Tek seferlik bilet kontrolü"),
+            ("monitor", "Sürekli bilet takibi başlat"),
+            ("status", "Aktif izlemeleri görüntüle"),
+            ("stop", "Aktif izlemeleri durdur"),
+        ])
+    
+    app.post_init = post_init
 
     print("✅ Bot çalışıyor...")
     app.run_polling()
