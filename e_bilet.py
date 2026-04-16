@@ -319,11 +319,9 @@ def get_available_train_times(from_id: int, to_id: int, target_date: datetime) -
                     timestamp_sn = timestamp_ms / 1000
                     kalkis_saati = datetime.fromtimestamp(timestamp_sn).strftime("%H:%M")
                     tren_adi = tren.get("trainName", "Tren")
-                    tren_tipi = tren.get("type", "Bilinmiyor")
                     train_times.append({
                         "time": kalkis_saati,
-                        "train_name": tren_adi,
-                        "train_type": tren_tipi
+                        "train_name": tren_adi
                     })
                 except (KeyError, IndexError):
                     continue
@@ -345,18 +343,10 @@ def create_time_selection_keyboard(available_times: list, selected_times: list, 
     
     for train_info in available_times:
         time_str = train_info["time"]
-        train_type = train_info.get("train_type", "")
         is_selected = time_str in selected_times
         
-        # Tren tipini belirle
-        type_display = ""
-        if train_type == "YHT":
-            type_display = " (YHT)"
-        elif train_type == "AH":
-            type_display = " (Anahat)"
-        
-        # Buton metni: seçiliyse ✅, değilse normal + tren tipi
-        button_text = f"✅ {time_str}{type_display}" if is_selected else f"{time_str}{type_display}"
+        # Buton metni: seçiliyse ✅, değilse normal
+        button_text = f"✅ {time_str}" if is_selected else time_str
         callback_data = f"{callback_prefix}_toggle_{time_str}"
         
         row.append(InlineKeyboardButton(button_text, callback_data=callback_data))
@@ -534,7 +524,7 @@ def check_api_and_parse(from_id: int, to_id: int, target_date: datetime,
                         unwanted_types = ["TEKERLEKLİ SANDALYE", "YATAKLI", "LOCA"]
                         
                         # Business filtresi
-                        if not include_business and "BUS" in sinif_adi.upper():
+                        if not include_business and "BUSINESS" in sinif_adi.upper():
                             continue
                         
                         if sinif_adi.upper() in unwanted_types:
@@ -939,14 +929,7 @@ async def button_callback(update: Update, context: CallbackContext):
                 }
                 
                 # Saatleri göster
-                # Tren tipini belirle
-                type_display = ""
-                if t.get("train_type") == "YHT":
-                    type_display = " (YHT)"
-                elif t.get("train_type") == "AH":
-                    type_display = " (Anahat)"
-                
-                times_info = "\n".join([f"• {t['time']}{type_display} - {t['train_name']}" for t in available_times[:10]])
+                times_info = "\n".join([f"• {t['time']} - {t['train_name']}" for t in available_times[:10]])
                 keyboard = create_time_selection_keyboard(
                     available_times, 
                     user_states[chat_id]["selected_times"],
@@ -1011,20 +994,7 @@ async def button_callback(update: Update, context: CallbackContext):
                 from_station = get_station_by_id(state["from_station_id"])
                 to_station = get_station_by_id(state["to_station_id"])
                 date_tr_str = state["target_date"].strftime("%d %B %Y")
-                
-                # Saatleri tren tipleriyle birlikte göster
-                selected_times_with_types = []
-                for time_str in sorted(state["selected_times"]):
-                    # available_times'dan tren tipini bul
-                    train_info = next((t for t in state["available_times"] if t["time"] == time_str), None)
-                    type_display = ""
-                    if train_info and train_info.get("train_type") == "YHT":
-                        type_display = " (YHT)"
-                    elif train_info and train_info.get("train_type") == "AH":
-                        type_display = " (Anahat)"
-                    selected_times_with_types.append(f"{time_str}{type_display}")
-                
-                times_str = ", ".join(selected_times_with_types)
+                times_str = ", ".join(sorted(state["selected_times"]))
                 
                 await query.edit_message_text(
                     text=f"🚆 *{from_station['name']}* ➡ *{to_station['name']}*\n🗓 *{date_tr_str}*\n"
@@ -1052,20 +1022,7 @@ async def button_callback(update: Update, context: CallbackContext):
             from_station = get_station_by_id(state["from_station_id"])
             to_station = get_station_by_id(state["to_station_id"])
             date_tr_str = state["target_date"].strftime("%d %B %Y")
-            
-            # Saatleri tren tipleriyle birlikte göster
-            selected_times_with_types = []
-            for time_str in sorted(state["selected_times"]):
-                # available_times'dan tren tipini bul
-                train_info = next((t for t in state["available_times"] if t["time"] == time_str), None)
-                type_display = ""
-                if train_info and train_info.get("train_type") == "YHT":
-                    type_display = " (YHT)"
-                elif train_info and train_info.get("train_type") == "AH":
-                    type_display = " (Anahat)"
-                selected_times_with_types.append(f"{time_str}{type_display}")
-            
-            times_str = ", ".join(selected_times_with_types)
+            times_str = ", ".join(sorted(state["selected_times"]))
             biz_str = "Dahil" if include_business else "Hariç"
             
             await query.edit_message_text(
@@ -1094,20 +1051,7 @@ async def button_callback(update: Update, context: CallbackContext):
             from_station = get_station_by_id(state["from_station_id"])
             to_station = get_station_by_id(state["to_station_id"])
             date_tr_str = state["target_date"].strftime("%d %B %Y")
-            
-            # Saatleri tren tipleriyle birlikte göster
-            selected_times_with_types = []
-            for time_str in sorted(state["selected_times"]):
-                # available_times'dan tren tipini bul
-                train_info = next((t for t in state["available_times"] if t["time"] == time_str), None)
-                type_display = ""
-                if train_info and train_info.get("train_type") == "YHT":
-                    type_display = " (YHT)"
-                elif train_info and train_info.get("train_type") == "AH":
-                    type_display = " (Anahat)"
-                selected_times_with_types.append(f"{time_str}{type_display}")
-            
-            times_str = ", ".join(selected_times_with_types)
+            times_str = ", ".join(sorted(state["selected_times"]))
             biz_str = "Dahil" if state["include_business"] else "Hariç"
             
             await query.edit_message_text(

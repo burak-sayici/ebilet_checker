@@ -10,4 +10,3 @@ ENV/
 env.bak/
 venv.bak/
 venv
-test*
