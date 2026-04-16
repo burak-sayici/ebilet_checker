@@ -345,14 +345,10 @@ def create_time_selection_keyboard(available_times: list, selected_times: list, 
     
     for train_info in available_times:
         time_str = train_info["time"]
-        train_type = train_info.get("type", "")
         is_selected = time_str in selected_times
         
-        # Saat gösteriminde tren tipi varsa parantez içinde göster (örn: "08:00 (YHT)")
-        display_time = f"{time_str} ({train_type})" if train_type else time_str
-        
         # Buton metni: seçiliyse ✅, değilse normal
-        button_text = f"✅ {display_time}" if is_selected else display_time
+        button_text = f"✅ {time_str}" if is_selected else time_str
         callback_data = f"{callback_prefix}_toggle_{time_str}"
         
         row.append(InlineKeyboardButton(button_text, callback_data=callback_data))
@@ -509,12 +505,15 @@ def check_api_and_parse(from_id: int, to_id: int, target_date: datetime,
                     timestamp_sn = timestamp_ms / 1000
                     kalkis_saati_str = datetime.fromtimestamp(timestamp_sn).strftime("%H:%M")
                     tren_adi = tren.get("trainName", f"Tren {toplam_tren_sayaci}")
+                    tren_tipi = tren.get("type", "")
                     
                     # Saat filtresi: Seçilen saatler varsa ve bu saat listede yoksa atla
                     if selected_times and kalkis_saati_str not in selected_times:
                         continue
                     
-                    tren_mesaj_taslagi += f"\n<b>{tren_adi} (Kalkış: {kalkis_saati_str})</b>:\n"
+                    # Tren tipi varsa parantez içinde göster (örn: "Kalkış: 08:00 - YHT")
+                    tip_bilgisi = f" - {tren_tipi}" if tren_tipi else ""
+                    tren_mesaj_taslagi += f"\n<b>{tren_adi} (Kalkış: {kalkis_saati_str}{tip_bilgisi})</b>:\n"
                     
                     vagon_bilgisi_sozlugu = tren["availableFareInfo"][0]
                     vagon_siniflari_listesi = vagon_bilgisi_sozlugu["cabinClasses"]
@@ -935,7 +934,7 @@ async def button_callback(update: Update, context: CallbackContext):
                 }
                 
                 # Saatleri göster
-                times_info = "\n".join([f"• {t['time']}{' (' + t['type'] + ')' if t.get('type') else ''} - {t['train_name']}" for t in available_times[:10]])
+                times_info = "\n".join([f"• {t['time']}{' (' + t['type'] + ')' if t.get('type') else ''} - {t['train_name']}" for t in available_times])
                 keyboard = create_time_selection_keyboard(
                     available_times, 
                     user_states[chat_id]["selected_times"],
