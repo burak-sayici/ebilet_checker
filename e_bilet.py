@@ -198,6 +198,16 @@ def normalize_turkish(text: str) -> str:
     
     return result
 
+def get_train_type_display(raw_type: str) -> str:
+    """
+    API'den gelen tren tipi kodunu kullanıcı dostu isme çevirir.
+    Örn: 'YHT' -> 'YHT', 'AHT' -> 'Kara Tren'
+    """
+    type_map = {
+        'AHT': 'Kara Tren',
+    }
+    return type_map.get(raw_type, raw_type)
+
 def search_stations(query: str, from_station_id: int = None) -> list:
     """
     İstasyonları arar. 
@@ -320,10 +330,11 @@ def get_available_train_times(from_id: int, to_id: int, target_date: datetime) -
                     kalkis_saati = datetime.fromtimestamp(timestamp_sn).strftime("%H:%M")
                     tren_adi = tren.get("trainName", "Tren")
                     tren_tipi = tren.get("type", "")
+                    tren_tipi_gosterim = get_train_type_display(tren_tipi) if tren_tipi else ""
                     train_times.append({
                         "time": kalkis_saati,
                         "train_name": tren_adi,
-                        "type": tren_tipi
+                        "type": tren_tipi_gosterim
                     })
                 except (KeyError, IndexError):
                     continue
@@ -512,7 +523,8 @@ def check_api_and_parse(from_id: int, to_id: int, target_date: datetime,
                         continue
                     
                     # Tren tipi varsa parantez içinde göster (örn: "Kalkış: 08:00 - YHT")
-                    tip_bilgisi = f" - {tren_tipi}" if tren_tipi else ""
+                    tren_tipi_gosterim = get_train_type_display(tren_tipi) if tren_tipi else ""
+                    tip_bilgisi = f" - {tren_tipi_gosterim}" if tren_tipi_gosterim else ""
                     tren_mesaj_taslagi += f"\n<b>{tren_adi} (Kalkış: {kalkis_saati_str}{tip_bilgisi})</b>:\n"
                     
                     vagon_bilgisi_sozlugu = tren["availableFareInfo"][0]
@@ -1154,6 +1166,28 @@ async def text_message_handler(update: Update, context: CallbackContext):
                 user_state["cleanup_ids"].append(msg.message_id)
                 return
             
+            # Tek sonuç varsa otomatik seç
+            if len(results) == 1:
+                from_station = results[0]
+                from_station_id = from_station['id']
+                
+                cleanup_ids = user_state.get("cleanup_ids", [])
+                user_states[chat_id] = {
+                    "state": "waiting_to",
+                    "action": action,
+                    "from_station_id": from_station_id,
+                    "cleanup_ids": cleanup_ids
+                }
+                
+                msg = await update.message.reply_text(
+                    f"✅ Kalkış: *{from_station['name']}* (otomatik seçildi)\n\n"
+                    f"🔍 *Varış İstasyonu Araması*\n\n"
+                    f"Lütfen varış istasyonu adını yazın (en az 3 karakter).",
+                    parse_mode='Markdown'
+                )
+                user_states[chat_id]["cleanup_ids"].append(msg.message_id)
+                return
+            
             keyboard = create_search_result_keyboard(results, action)
             msg = await update.message.reply_text(
                 f"🔍 *'{search_query}'* için {len(results)} sonuç bulundu:\n\n"
@@ -1176,6 +1210,31 @@ async def text_message_handler(update: Update, context: CallbackContext):
                     parse_mode='Markdown'
                 )
                 user_state["cleanup_ids"].append(msg.message_id)
+                return
+            
+            # Tek sonuç varsa otomatik seç ve tarih seçimine geç
+            if len(results) == 1:
+                to_station = results[0]
+                to_station_id = to_station['id']
+                
+                cleanup_ids = user_state.get("cleanup_ids", [])
+                user_states[chat_id] = {
+                    "state": "waiting_date",
+                    "action": action,
+                    "from_station_id": from_station_id,
+                    "to_station_id": to_station_id,
+                    "cleanup_ids": cleanup_ids
+                }
+                
+                keyboard = create_date_keyboard(action=action, from_station_id=from_station_id, to_station_id=to_station_id)
+                msg = await update.message.reply_text(
+                    f"✅ Kalkış: *{from_station['name']}*\n"
+                    f"✅ Varış: *{to_station['name']}* (otomatik seçildi)\n\n"
+                    f"Lütfen bir *tarih* seçin:",
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
+                )
+                user_states[chat_id]["cleanup_ids"].append(msg.message_id)
                 return
             
             keyboard = create_search_result_keyboard(results, action, from_station_id)
