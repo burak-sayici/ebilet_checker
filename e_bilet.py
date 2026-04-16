@@ -319,9 +319,11 @@ def get_available_train_times(from_id: int, to_id: int, target_date: datetime) -
                     timestamp_sn = timestamp_ms / 1000
                     kalkis_saati = datetime.fromtimestamp(timestamp_sn).strftime("%H:%M")
                     tren_adi = tren.get("trainName", "Tren")
+                    tren_tipi = tren.get("type", "")
                     train_times.append({
                         "time": kalkis_saati,
-                        "train_name": tren_adi
+                        "train_name": tren_adi,
+                        "type": tren_tipi
                     })
                 except (KeyError, IndexError):
                     continue
@@ -343,10 +345,14 @@ def create_time_selection_keyboard(available_times: list, selected_times: list, 
     
     for train_info in available_times:
         time_str = train_info["time"]
+        train_type = train_info.get("type", "")
         is_selected = time_str in selected_times
         
+        # Saat gösteriminde tren tipi varsa parantez içinde göster (örn: "08:00 (YHT)")
+        display_time = f"{time_str} ({train_type})" if train_type else time_str
+        
         # Buton metni: seçiliyse ✅, değilse normal
-        button_text = f"✅ {time_str}" if is_selected else time_str
+        button_text = f"✅ {display_time}" if is_selected else display_time
         callback_data = f"{callback_prefix}_toggle_{time_str}"
         
         row.append(InlineKeyboardButton(button_text, callback_data=callback_data))
@@ -524,7 +530,7 @@ def check_api_and_parse(from_id: int, to_id: int, target_date: datetime,
                         unwanted_types = ["TEKERLEKLİ SANDALYE", "YATAKLI", "LOCA"]
                         
                         # Business filtresi
-                        if not include_business and "BUSINESS" in sinif_adi.upper():
+                        if not include_business and "BUS" in sinif_adi.upper():
                             continue
                         
                         if sinif_adi.upper() in unwanted_types:
@@ -929,7 +935,7 @@ async def button_callback(update: Update, context: CallbackContext):
                 }
                 
                 # Saatleri göster
-                times_info = "\n".join([f"• {t['time']} - {t['train_name']}" for t in available_times[:10]])
+                times_info = "\n".join([f"• {t['time']}{' (' + t['type'] + ')' if t.get('type') else ''} - {t['train_name']}" for t in available_times[:10]])
                 keyboard = create_time_selection_keyboard(
                     available_times, 
                     user_states[chat_id]["selected_times"],
