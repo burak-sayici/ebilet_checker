@@ -986,9 +986,6 @@ async def button_callback(update: Update, context: CallbackContext):
                 return
             
             elif action == "monitor":
-                if chat_id in monitor_jobs:
-                    await query.message.reply_text("Zaten aktif bir izlemeniz var. /stop")
-                    return
                 
                 await query.edit_message_text(
                     text=f"🚆 *{from_station['name']}* ➡ *{to_station['name']}*\n🗓 *{date_tr_str}*\n\n⏳ Sefer saatleri alınıyor...", 
