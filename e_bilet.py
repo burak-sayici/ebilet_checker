@@ -11,6 +11,20 @@ from dotenv import load_dotenv
 import os
 
 try:
+    import pytz
+    TZ_ISTANBUL = pytz.timezone('Europe/Istanbul')
+except ImportError:
+    try:
+        import zoneinfo
+        TZ_ISTANBUL = zoneinfo.ZoneInfo('Europe/Istanbul')
+    except (ImportError, Exception):
+        from datetime import timezone
+        TZ_ISTANBUL = timezone(timedelta(hours=3))
+
+def get_now():
+    return datetime.now(TZ_ISTANBUL)
+
+try:
     locale.setlocale(locale.LC_TIME, 'tr_TR.UTF-8')
 except locale.Error:
     try:
@@ -621,7 +635,53 @@ def monitoring_loop(chat_id: str, job_id: int, stop_event: threading.Event, from
     previous_state = {}
     first_check = True
     
+    now_init = get_now()
+    last_daily_message_date = now_init.date() if now_init.hour >= 9 else (now_init.date() - timedelta(days=1))
+    
     while not stop_event.is_set():
+        now = get_now()
+        
+        # Sefer saati geçti mi kontrolü
+        is_past = False
+        if selected_times:
+            try:
+                max_time_str = max(selected_times)
+                max_time = datetime.strptime(max_time_str, "%H:%M").time()
+                latest_departure = datetime.combine(target_date.date(), max_time, tzinfo=TZ_ISTANBUL)
+                if now > latest_departure:
+                    is_past = True
+            except Exception as e:
+                print(f"Time parse error: {e}")
+                if now.date() > target_date.date():
+                    is_past = True
+        else:
+            if now.date() > target_date.date():
+                is_past = True
+                
+        if is_past:
+            send_telegram_message(
+                f"🛑 *Takip Otomatik Durduruldu*\n\n"
+                f"*{from_station['name']} ➡ {to_station['name']}*\n"
+                f"📅 {target_date.strftime('%d %B %Y')}\n\n"
+                f"Sefer tarihi ve saati geçtiği için bu izleme görevi otomatik olarak sonlandırıldı.",
+                chat_id
+            )
+            print(f"Sefer saati geçti, izleme durduruluyor ({chat_id}, Job #{job_id}).")
+            break
+
+        # 9:00 AM daily message check
+        if now.hour == 9 and last_daily_message_date != now.date():
+            daily_msg = (
+                f"👋 Merhaba, biletini satın aldın mı?\n"
+                f"Eğer satın aldıysan, sürekli izlemeyi durdurmayı düşünebilirsin.\n\n"
+                f"📌 *Mevcut İzleme:*\n"
+                f"*{from_station['name']} ➡ {to_station['name']}*\n"
+                f"📅 {target_date.strftime('%d %B %Y')}\n"
+                f"{filter_summary}"
+            )
+            send_telegram_message(daily_msg, chat_id)
+            last_daily_message_date = now.date()
+
         print(f"API Kontrol ediliyor ({chat_id})...")
         
         found, message = check_api_and_parse(from_id, to_id, target_date, 
@@ -705,7 +765,7 @@ def monitoring_loop(chat_id: str, job_id: int, stop_event: threading.Event, from
 
 def create_date_keyboard(action: str, from_station_id: int, to_station_id: int) -> InlineKeyboardMarkup:
     keyboard = []
-    today = datetime.today()
+    today = get_now()
     
     row = []
     for i in range(0, 13):
