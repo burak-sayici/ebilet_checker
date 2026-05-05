@@ -78,7 +78,7 @@ def send_telegram_message(message: str, chat_id: str):
 def get_dynamic_token():
     base_url = "https://ebilet.tcddtasimacilik.gov.tr"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     }
     
@@ -88,31 +88,40 @@ def get_dynamic_token():
         main_page_response.raise_for_status()
         
         html_content = main_page_response.text
-        js_match = re.search(r'src="(/js/index\.[a-f0-9]+\.js\?.*?)"', html_content)
-        if not js_match:
-            print("HATA: Ana JS dosyası HTML'de bulunamadı.")
+
+        # Tüm JS dosyalarını bul (index içerenler token adayıdır)
+        # Eski pattern: /js/index.HASH.js  -> Yeni pattern: /js/index~XXXX.HASH.js
+        all_js_files = re.findall(r'src="(/js/[^"]+\.js[^"]*)"', html_content)
+        index_js_files = [f for f in all_js_files if '/js/index' in f]
+        
+        if not index_js_files:
+            print("HATA: Index JS dosyaları HTML'de bulunamadı.")
             return None
-        
-        js_file_url = base_url + js_match.group(1)
-        print(f"Bulunan JS dosyası: {js_file_url}")
-        
-        js_response = requests.get(js_file_url, headers=headers, timeout=10)
-        js_response.raise_for_status()
-        
-        js_content = js_response.text
-        token_match = re.search(
-            r'case\s*"TCDD-PROD":.*?["\'](eyJh[a-zA-Z0-9\._-]+)["\']', 
-            js_content, 
-            re.DOTALL
-        )
-        
-        if not token_match:
-            print("HATA: 'TCDD-PROD' token'ı bulunamadı.")
-            return None
+
+        print(f"Bulunan index JS dosyaları: {len(index_js_files)} adet")
+
+        # Her index JS dosyasında TCDD-PROD token'ını ara
+        for js_path in index_js_files:
+            js_file_url = base_url + js_path
+            print(f"JS dosyası taranıyor: {js_file_url[:80]}...")
             
-        access_token = token_match.group(1)
-        print("✅ Dinamik token başarıyla bulundu.")
-        return f"Bearer {access_token}"
+            js_response = requests.get(js_file_url, headers=headers, timeout=10)
+            js_response.raise_for_status()
+            js_content = js_response.text
+
+            # case"TCDD-PROD":F="eyJh..." veya case "TCDD-PROD": ... "eyJh..."
+            token_match = re.search(
+                r'case\s*"TCDD-PROD"\s*:\s*\w*\s*=\s*"(eyJh[a-zA-Z0-9._-]+)"',
+                js_content
+            )
+            
+            if token_match:
+                access_token = token_match.group(1)
+                print("✅ Dinamik token başarıyla bulundu.")
+                return f"Bearer {access_token}"
+
+        print("HATA: Hiçbir JS dosyasında 'TCDD-PROD' token'ı bulunamadı.")
+        return None
 
     except Exception as e:
         print(f"HATA: Token alma hatası: {e}")
