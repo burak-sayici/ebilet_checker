@@ -121,15 +121,9 @@ def get_dynamic_token():
 def load_stations():
     global STATIONS_DATA, STATIONS_BY_ID
     
-    dynamic_token = get_dynamic_token()
-    if not dynamic_token:
-        print("❌ Token alınamadı, istasyonlar yüklenemedi!")
-        return False
-    
     headers = {
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'tr',
-        'Authorization': dynamic_token,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://ebilet.tcddtasimacilik.gov.tr/',
         'unit-id': '3895',
